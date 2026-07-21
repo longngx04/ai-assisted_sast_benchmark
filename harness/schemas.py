@@ -112,3 +112,106 @@ class Finding:
         payload["severity"] = self.severity.value
         payload["validation_status"] = self.validation_status.value
         return payload
+
+
+class ValidationDecision(str, Enum):
+    VALIDATED = "validated"
+    REJECTED = "rejected"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationContext:
+    """Input payload context provided to an independent validator engine."""
+    finding: Finding
+    code_context: str
+    caller_callee_info: list[str]
+    security_assumptions: list[str]
+    attack_scenario: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.finding, Finding):
+            raise FindingSchemaError("finding must be a Finding instance")
+        if not isinstance(self.code_context, str):
+            raise FindingSchemaError("code_context must be a string")
+        if not isinstance(self.attack_scenario, str):
+            raise FindingSchemaError("attack_scenario must be a string")
+        if not isinstance(self.caller_callee_info, list) or any(not isinstance(x, str) for x in self.caller_callee_info):
+            raise FindingSchemaError("caller_callee_info must be a list of strings")
+        if not isinstance(self.security_assumptions, list) or any(not isinstance(x, str) for x in self.security_assumptions):
+            raise FindingSchemaError("security_assumptions must be a list of strings")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finding": self.finding.to_dict(),
+            "code_context": self.code_context,
+            "caller_callee_info": self.caller_callee_info,
+            "security_assumptions": self.security_assumptions,
+            "attack_scenario": self.attack_scenario,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ValidationContext":
+        try:
+            values = dict(payload)
+            values["finding"] = Finding.from_dict(values["finding"])
+            return cls(**values)
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, FindingSchemaError):
+                raise
+            raise FindingSchemaError(f"invalid validation context payload: {exc}") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationResult:
+    """Output contract returned by an independent validator engine."""
+    status: ValidationDecision
+    confidence: float
+    reason: str
+    missing_evidence: list[str]
+    recommended_manual_check: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, ValidationDecision):
+            raise FindingSchemaError("status must be a ValidationDecision enum value")
+        if isinstance(self.confidence, bool) or not isinstance(self.confidence, (int, float)) or not 0 <= self.confidence <= 1:
+            raise FindingSchemaError("confidence must be a number between 0 and 1")
+        if not isinstance(self.reason, str):
+            raise FindingSchemaError("reason must be a string")
+        if not isinstance(self.recommended_manual_check, str):
+            raise FindingSchemaError("recommended_manual_check must be a string")
+        if not isinstance(self.missing_evidence, list) or any(not isinstance(x, str) for x in self.missing_evidence):
+            raise FindingSchemaError("missing_evidence must be a list of strings")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "missing_evidence": self.missing_evidence,
+            "recommended_manual_check": self.recommended_manual_check,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "ValidationResult":
+        try:
+            values = dict(payload)
+            values["status"] = ValidationDecision(values["status"])
+            return cls(**values)
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, FindingSchemaError):
+                raise
+            raise FindingSchemaError(f"invalid validation result payload: {exc}") from exc
+
+    def apply_to_finding(self, finding: Finding, validator_name: str) -> Finding:
+        """Apply validator decision and metadata back to update a Finding instance."""
+        data = finding.to_dict()
+        data["validation_status"] = self.status.value
+        data["validator"] = validator_name
+        data["validator_confidence"] = self.confidence
+        if self.reason:
+            existing_notes = data.get("notes", "")
+            validator_note = f"[Validator ({validator_name})]: {self.reason}"
+            data["notes"] = f"{existing_notes}\n{validator_note}".strip() if existing_notes else validator_note
+        return Finding.from_dict(data)
+

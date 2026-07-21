@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-assisted-sast-benchmark:validation-context:1.0",
+  "title": "AI-assisted SAST validator context payload",
+  "description": "Context payload required by independent validator engines.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "finding",
+    "code_context",
+    "caller_callee_info",
+    "security_assumptions",
+    "attack_scenario"
+  ],
+  "properties": {
+    "finding": {
+      "$ref": "finding.schema.json"
+    },
+    "code_context": {
+      "type": "string"
+    },
+    "caller_callee_info": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "security_assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "attack_scenario": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ai-assisted-sast-benchmark:validation-result:1.0",
+  "title": "AI-assisted SAST validator result",
+  "description": "Stable validator response contract shared by all independent validation phases.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "confidence",
+    "reason",
+    "missing_evidence",
+    "recommended_manual_check"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["validated", "rejected", "uncertain"]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "reason": {
+      "type": "string"
+    },
+    "missing_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommended_manual_check": {
+      "type": "string"
+    }
+  }
+}
