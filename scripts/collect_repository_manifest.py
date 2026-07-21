@@ -16,10 +16,12 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
-DEFAULT_EXCLUDES = {
-    ".git", ".idea", ".mvn/wrapper", "target", "build", ".gradle",
-    "node_modules", "vendor", "generated", "out",
-}
+try:
+    from harness.exclusions import ExclusionPolicy
+except ModuleNotFoundError:  # Support direct execution from outside the project root.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from harness.exclusions import ExclusionPolicy
+
 SOURCE_EXTENSIONS = {".java", ".kt", ".kts", ".groovy", ".xml", ".js", ".ts", ".html", ".css"}
 FRAMEWORK_HINTS = {
     "spring": "Spring",
@@ -46,14 +48,6 @@ def _git(root: Path, *args: str) -> str | None:
 
 def _relative(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
-
-
-def _is_excluded(relative: str) -> bool:
-    parts = Path(relative).parts
-    return any(part in DEFAULT_EXCLUDES for part in parts) or any(
-        relative == value or relative.startswith(value + "/")
-        for value in DEFAULT_EXCLUDES
-    )
 
 
 def _line_count(path: Path) -> int:
@@ -101,13 +95,17 @@ def _pom_metadata(poms: list[Path], root: Path) -> tuple[list[str], list[str], l
     return sorted(modules), sorted(framework_names), maven_modules
 
 
-def collect_manifest(root: Path) -> dict:
+def collect_manifest(root: Path, policy: ExclusionPolicy | None = None) -> dict:
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"source root does not exist or is not a directory: {root}")
+    if policy is None:
+        policy_path = Path(__file__).resolve().parents[1] / "configs/exclusions.json"
+        policy = ExclusionPolicy.from_file(policy_path)
+
     files: list[Path] = []
     for path in root.rglob("*"):
-        if path.is_file() and not _is_excluded(_relative(path, root)):
+        if path.is_file() and not policy.should_exclude(_relative(path, root)):
             files.append(path)
     files.sort()
     java_files = [p for p in files if p.suffix == ".java"]
@@ -163,7 +161,8 @@ def collect_manifest(root: Path) -> dict:
             "dependency": dependency_dirs,
             "generated_or_build": generated_dirs,
         },
-        "exclusions": sorted(DEFAULT_EXCLUDES),
+        "exclusions": policy.manifest_rules(),
+        "explicit_inclusions": policy.included_paths,
         "pom_files": [_relative(p, root) for p in poms],
         "warnings": [] if java_files else ["No Java source files were found under the source root."],
     }
@@ -176,9 +175,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=os.environ.get("WEBGOAT_ROOT", "webgoat/WebGoat-2025.3"), type=Path)
     parser.add_argument("--output", default="results/repository_manifest.json", type=Path)
+    parser.add_argument(
+        "--exclusions-config",
+        default=Path(__file__).resolve().parents[1] / "configs/exclusions.json",
+        type=Path,
+    )
     args = parser.parse_args()
     try:
-        manifest = collect_manifest(args.root)
+        manifest = collect_manifest(args.root, ExclusionPolicy.from_file(args.exclusions_config))
     except (FileNotFoundError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

@@ -34,7 +34,8 @@ class RepositoryManifestTest(unittest.TestCase):
             self.assertEqual(manifest["paths"]["tests"], ["src/test"])
             self.assertEqual(manifest["maven_modules"], [{"path": ".", "artifact_id": "fixture-app"}])
             self.assertEqual(manifest["revision"], None)
-            self.assertIn("target", manifest["exclusions"])
+            self.assertTrue(any(rule["pattern"] == "**/target/**" for rule in manifest["exclusions"]))
+            self.assertTrue(any(item["pattern"] == "**/src/test/**" for item in manifest["explicit_inclusions"]))
 
     def test_manifest_is_json_serializable(self):
         with tempfile.TemporaryDirectory() as temporary:

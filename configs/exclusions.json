@@ -1,112 +1,82 @@
 {
-  "manifest_version": "1.0",
-  "generated_at": "2026-07-21T03:39:42.420395+00:00",
-  "repository_name": "WebGoat-2025.3",
-  "repository_root": "/home/longngx04/VinSOC/week 2/AI-assisted_SAST_Bechmark/repo/webgoat/WebGoat-2025.3",
-  "revision": "5eb52db7d0cd9390946f8dcd6f39b7f58008ebcf",
-  "branch": "main",
-  "git_available": true,
-  "language": {
-    "primary": "Java",
-    "file_counts": {
-      ".xml": 6,
-      ".html": 69,
-      ".java": 370,
-      ".js": 94,
-      ".css": 30
-    }
-  },
-  "source": {
-    "file_count": 569,
-    "java_file_count": 370,
-    "line_count": 98026
-  },
-  "modules": [],
-  "maven_modules": [
-    {
-      "path": ".",
-      "artifact_id": "webgoat"
-    }
-  ],
-  "frameworks": [
-    "Spring",
-    "Spring Boot",
-    "Spring Security",
-    "Thymeleaf",
-    "WebJars"
-  ],
-  "paths": {
-    "source": [
-      "src/main"
-    ],
-    "tests": [
-      "src/test"
-    ],
-    "dependency": [],
-    "generated_or_build": [
-      "target"
-    ]
-  },
-  "exclusions": [
+  "version": "1.0",
+  "description": "Default paths excluded from product-source security analysis.",
+  "rules": [
     {
       "pattern": "**/.git/**",
+      "match": "directory_segment",
+      "value": ".git",
       "category": "repository_metadata",
       "reason": "Git object and metadata files are not executable product source."
     },
     {
       "pattern": "**/.mvn/**",
+      "match": "directory_segment",
+      "value": ".mvn",
       "category": "build_tooling",
       "reason": "Maven wrapper bootstrap code and binaries are build tooling, not WebGoat product source."
     },
     {
       "pattern": "**/target/**",
+      "match": "directory_segment",
+      "value": "target",
       "category": "build_output",
       "reason": "Maven output duplicates source and contains generated or compiled artifacts."
     },
     {
       "pattern": "**/build/**",
+      "match": "directory_segment",
+      "value": "build",
       "category": "build_output",
       "reason": "Build output is generated and can duplicate product source."
     },
     {
       "pattern": "**/.gradle/**",
+      "match": "directory_segment",
+      "value": ".gradle",
       "category": "build_cache",
       "reason": "Gradle cache data is not product source."
     },
     {
       "pattern": "**/node_modules/**",
+      "match": "directory_segment",
+      "value": "node_modules",
       "category": "dependency",
       "reason": "Vendored JavaScript dependencies are outside the source-analysis scope."
     },
     {
       "pattern": "**/vendor/**",
+      "match": "directory_segment",
+      "value": "vendor",
       "category": "dependency",
       "reason": "Vendored third-party dependencies are outside the product-source scope."
     },
     {
       "pattern": "**/generated/**",
+      "match": "directory_segment",
+      "value": "generated",
       "category": "generated_source",
       "reason": "Generated source is excluded unless an experiment explicitly opts in."
     },
     {
       "pattern": "**/out/**",
+      "match": "directory_segment",
+      "value": "out",
       "category": "build_output",
       "reason": "IDE and compiler output is generated from tracked source."
     },
     {
       "pattern": "**/*.class",
+      "match": "suffix",
+      "value": ".class",
       "category": "compiled_binary",
       "reason": "Compiled JVM bytecode is not scanned as source code."
     }
   ],
-  "explicit_inclusions": [
+  "included_paths": [
     {
       "pattern": "**/src/test/**",
       "reason": "Tests remain searchable because they can establish reachability, intended behavior, and local ground-truth evidence."
     }
-  ],
-  "pom_files": [
-    "pom.xml"
-  ],
-  "warnings": []
+  ]
 }
