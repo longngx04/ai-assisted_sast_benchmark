@@ -1,0 +1,66 @@
+{
+  "manifest_version": "1.0",
+  "generated_at": "2026-07-21T03:39:18.104053+00:00",
+  "repository_name": "WebGoat-2025.3",
+  "repository_root": "/home/longngx04/VinSOC/week 2/AI-assisted_SAST_Bechmark/repo/webgoat/WebGoat-2025.3",
+  "revision": "009e09463b360ef4e926d1902dc868c06e7ec377",
+  "branch": "main",
+  "git_available": true,
+  "language": {
+    "primary": "Java",
+    "file_counts": {
+      ".xml": 6,
+      ".html": 69,
+      ".java": 370,
+      ".js": 94,
+      ".css": 30
+    }
+  },
+  "source": {
+    "file_count": 569,
+    "java_file_count": 370,
+    "line_count": 98026
+  },
+  "modules": [],
+  "maven_modules": [
+    {
+      "path": ".",
+      "artifact_id": "webgoat"
+    }
+  ],
+  "frameworks": [
+    "Spring",
+    "Spring Boot",
+    "Spring Security",
+    "Thymeleaf",
+    "WebJars"
+  ],
+  "paths": {
+    "source": [
+      "src/main"
+    ],
+    "tests": [
+      "src/test"
+    ],
+    "dependency": [],
+    "generated_or_build": [
+      "target"
+    ]
+  },
+  "exclusions": [
+    ".git",
+    ".gradle",
+    ".idea",
+    ".mvn/wrapper",
+    "build",
+    "generated",
+    "node_modules",
+    "out",
+    "target",
+    "vendor"
+  ],
+  "pom_files": [
+    "pom.xml"
+  ],
+  "warnings": []
+}
