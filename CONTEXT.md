@@ -35,6 +35,7 @@ Mục tiêu cuối cùng là trả lời được câu hỏi:
   * false positives;
   * uncertain findings.
 * Kết quả phải tái lập được.
+* Luôn luôn viết báo cáo (report) trong thư mục `reports/` sau khi hoàn thành triển khai từng task.
 * Các lần benchmark phải sử dụng cùng source revision và điều kiện máy chạy tương đương.
 * Nếu phải ước lượng token hoặc precision, phải ghi rõ đó là số liệu ước lượng.
 * Không được trình bày dữ liệu tự ước lượng như số liệu thật.

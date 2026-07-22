@@ -265,6 +265,67 @@ class JavaIndexer:
         )
         return index_path
 
+    @staticmethod
+    def load_index(data: dict[str, Any]) -> JavaSymbolIndex:
+        """Construct a JavaSymbolIndex instance from a parsed JSON dict."""
+        classes: list[ClassInfo] = []
+        for c in data.get("classes", []):
+            methods: list[MethodInfo] = []
+            for m in c.get("methods", []):
+                annotations = [
+                    AnnotationInfo(**ann) for ann in m.get("annotations", [])
+                ]
+                ep_data = m.get("endpoint")
+                endpoint = EndpointMapping(**ep_data) if ep_data else None
+                methods.append(MethodInfo(
+                    name=m["name"],
+                    class_name=m["class_name"],
+                    file=m["file"],
+                    start_line=m["start_line"],
+                    end_line=m["end_line"],
+                    visibility=m["visibility"],
+                    return_type=m["return_type"],
+                    parameters=m["parameters"],
+                    annotations=annotations,
+                    endpoint=endpoint,
+                    calls=m.get("calls", []),
+                ))
+            class_annotations = [
+                AnnotationInfo(**ann) for ann in c.get("annotations", [])
+            ]
+            imports = [
+                ImportInfo(**imp) for imp in c.get("imports", [])
+            ]
+            classes.append(ClassInfo(
+                kind=c["kind"],
+                name=c["name"],
+                qualified_name=c["qualified_name"],
+                package=c["package"],
+                file=c["file"],
+                start_line=c["start_line"],
+                end_line=c["end_line"],
+                visibility=c["visibility"],
+                annotations=class_annotations,
+                extends=c.get("extends"),
+                implements=c.get("implements", []),
+                methods=methods,
+                imports=imports,
+            ))
+        edges = [
+            CallerCalleeEdge(**edge)
+            for edge in data.get("caller_callee_edges", [])
+        ]
+        return JavaSymbolIndex(
+            generated_at=data.get("generated_at", ""),
+            webgoat_root=data.get("webgoat_root", ""),
+            total_java_files=data.get("total_java_files", 0),
+            indexed_files=data.get("indexed_files", 0),
+            excluded_files=data.get("excluded_files", 0),
+            classes=classes,
+            caller_callee_edges=edges,
+            summary=data.get("summary", {}),
+        )
+
     # -- Lookup helpers (for downstream phases) ------------------------------
 
     @staticmethod
