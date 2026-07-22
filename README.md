@@ -11,18 +11,38 @@ An offline, reproducible benchmark framework for evaluating LLM-assisted Static 
 ## 🚀 Quick Start
 
 ### 1. Environment Setup
-No external dependencies required for core harness execution (uses Python stdlib).
+The harness uses Python 3.10+ and PyYAML for experiment configuration. Gemini
+requests use the standard-library HTTPS client; no Google SDK is required.
 
 ```bash
 # Verify Python environment and repo state
 python3 scripts/check_environment.py
+
+# Install the only non-stdlib runtime dependency if needed
+python3 -m pip install pyyaml
+
+# Load your Google API key into the current shell; never commit the key.
+export GEMINI_API_KEY='YOUR_GOOGLE_GEMINI_API_KEY'
 ```
 
 ### 2. Run End-to-End Experiment Scan
 Execute the end-to-end benchmark scanner on WebGoat:
 
 ```bash
-./scripts/run_scan.sh exp-d-optimized
+./scripts/run_scan.sh optimized exp-d-gemini-optimized
+```
+
+The second argument must be a new experiment ID. The wrapper intentionally has
+no mock mode and refuses to mix usage logs with a previous run. Other strategies
+are `baseline`, `vulnerability-specific`, and `indexed`.
+
+For a direct run:
+
+```bash
+python3 -m harness.runner \
+  --config configs/optimized.yaml \
+  --experiment-id exp-d-gemini-optimized \
+  --source webgoat/WebGoat-2025.3
 ```
 
 ### 3. Summarize Benchmark Results
@@ -32,13 +52,27 @@ Display comparative matrix across all experiment runs:
 python3 scripts/summarize_results.py results
 ```
 
+Artifacts are written under `results/<experiment-id>/`, including
+`findings.jsonl`, `raw_findings.jsonl`, `llm_usage.jsonl`, `metrics.json`, and
+`run_metadata.json`. Token usage is provider-reported when Gemini returns usage
+metadata. Precision remains `null` until a complete, reviewed local ground-truth
+dataset is supplied and the config sets `ground_truth_complete: true`.
+
+Validate a completed run:
+
+```bash
+python3 scripts/validate_jsonl.py results/exp-d-gemini-optimized/findings.jsonl
+python3 scripts/validate_findings.py results/exp-d-gemini-optimized/findings.jsonl
+python3 scripts/summarize_results.py results/exp-d-gemini-optimized
+```
+
 ---
 
 ## 🛠️ Benchmark CLI Tools
 
 | Command | Purpose |
 | :--- | :--- |
-| `./scripts/run_scan.sh <exp-id>` | Runs end-to-end experiment scan and validates outputs |
+| `./scripts/run_scan.sh <strategy> <new-exp-id>` | Runs a Gemini end-to-end experiment and validates outputs |
 | `python3 -m harness.runner --config configs/optimized.yaml` | Main Python harness runner |
 | `python3 scripts/validate_jsonl.py <file.jsonl>` | Validates JSONL structure, schema, line numbers, and relative paths |
 | `python3 scripts/validate_findings.py <findings.jsonl>` | Validates findings against canonical `Finding` contract schema |

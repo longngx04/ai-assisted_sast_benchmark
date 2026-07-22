@@ -1,6 +1,7 @@
 """Unit tests for Phase 8 converters and validators."""
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -84,6 +85,13 @@ class TestPhase8ConvertersAndValidators(unittest.TestCase):
         is_valid, errors = validate_findings_file(p)
         self.assertTrue(is_valid)
         self.assertEqual(len(errors), 0)
+
+        cli_result = subprocess.run(
+            ["python3", "scripts/validate_findings.py", str(p)],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(cli_result.returncode, 0, cli_result.stderr + cli_result.stdout)
 
 
 if __name__ == "__main__":
