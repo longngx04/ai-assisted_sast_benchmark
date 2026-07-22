@@ -241,7 +241,18 @@ class ModelClient:
     def _mock_call(self, prompt: str, meta: dict[str, Any]) -> tuple[str, Any]:
         """Mock provider for offline testing and fixture validation."""
         category = meta.get("category", "")
-        # Generate clean synthetic finding json response
+        analysis_type = meta.get("analysis_type", "")
+
+        if analysis_type == "validation" or "validated|rejected|uncertain" in prompt.lower():
+            decision = {
+                "status": "validated",
+                "confidence": 0.95,
+                "reason": "Clear unparameterized SQL concatenation.",
+                "missing_evidence": [],
+                "recommended_manual_check": "None",
+            }
+            return json.dumps(decision, indent=2), decision
+
         if "sqli" in prompt.lower() or category == "database":
             finding = [{
                 "vulnerability_type": "SQL Injection",
@@ -258,15 +269,6 @@ class ModelClient:
                 "recommendation": "Use PreparedStatement",
             }]
             return json.dumps(finding, indent=2), finding
-        elif "validation" in prompt.lower():
-            decision = {
-                "status": "validated",
-                "confidence": 0.95,
-                "reason": "Clear unparameterized SQL concatenation.",
-                "missing_evidence": [],
-                "recommended_manual_check": "None",
-            }
-            return json.dumps(decision, indent=2), decision
         else:
             return "[]", []
 
