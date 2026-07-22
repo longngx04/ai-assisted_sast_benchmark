@@ -12,6 +12,9 @@ import json
 import os
 import time
 import uuid
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -177,6 +180,7 @@ class ModelClient:
         start_time = time.monotonic()
         raw_text = ""
         parsed_json = None
+        provider_usage: TokenUsage | None = None
         error_msg = None
         retries = 0
 
@@ -186,7 +190,9 @@ class ModelClient:
                 if model_name.startswith("mock"):
                     raw_text, parsed_json = self._mock_call(prompt, meta)
                 else:
-                    raw_text, parsed_json = self._gemini_call(prompt, model_name, timeout_seconds)
+                    raw_text, parsed_json, provider_usage = self._gemini_call(
+                        prompt, model_name, timeout_seconds
+                    )
                 error_msg = None
                 break
             except Exception as exc:
@@ -197,12 +203,15 @@ class ModelClient:
         latency = round(time.monotonic() - start_time, 3)
 
         # 3. Token estimation
-        meas_type = "mock" if model_name.startswith("mock") else "character_estimate"
-        usage = TokenUsage(
-            input_tokens=self._estimate_tokens(prompt),
-            output_tokens=self._estimate_tokens(raw_text),
-            measurement_type=meas_type,
-        )
+        if provider_usage is not None:
+            usage = provider_usage
+        else:
+            meas_type = "mock" if model_name.startswith("mock") else "character_estimate"
+            usage = TokenUsage(
+                input_tokens=self._estimate_tokens(prompt),
+                output_tokens=self._estimate_tokens(raw_text),
+                measurement_type=meas_type,
+            )
 
         response = ModelResponse(
             request_id=req_id,
@@ -272,22 +281,72 @@ class ModelClient:
         else:
             return "[]", []
 
-    def _gemini_call(self, prompt: str, model_name: str, timeout: float) -> tuple[str, Any]:
-        """Call Gemini API via google-genai or google.generativeai if available."""
-        api_key = os.getenv("GEMINI_API_KEY")
+    def _gemini_call(
+        self, prompt: str, model_name: str, timeout: float
+    ) -> tuple[str, Any, TokenUsage]:
+        """Call the Google Gemini REST API without requiring a provider SDK.
+
+        The API key is sent in the ``x-goog-api-key`` header so it never appears
+        in URLs, logs, cache keys, or exception messages.  ``GEMINI_API_BASE_URL``
+        may point at an approved proxy; otherwise Google's v1beta endpoint is
+        used.
+        """
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
         if not api_key:
-            raise RuntimeError("GEMINI_API_KEY environment variable not set")
+            raise RuntimeError("Set GEMINI_API_KEY (or GOOGLE_API_KEY) before using Gemini")
+
+        api_base = os.getenv(
+            "GEMINI_API_BASE_URL",
+            "https://generativelanguage.googleapis.com/v1beta",
+        ).rstrip("/")
+        encoded_model = urllib.parse.quote(model_name, safe="-._")
+        url = f"{api_base}/models/{encoded_model}:generateContent"
+        payload = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+            },
+        }
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
+            method="POST",
+        )
 
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel(model_name)
-            res = model.generate_content(prompt)
-            raw = res.text or ""
-            parsed = self._try_parse_json(raw)
-            return raw, parsed
-        except ImportError:
-            raise RuntimeError("Google Generative AI SDK (google-generativeai) not installed in runtime")
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                response_payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Gemini API returned HTTP {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Gemini API request failed: {exc.reason}") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Gemini API returned an invalid JSON response") from exc
+
+        text_parts: list[str] = []
+        for candidate in response_payload.get("candidates", []):
+            for part in candidate.get("content", {}).get("parts", []):
+                if isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+        raw = "\n".join(text_parts).strip()
+        if not raw:
+            raise RuntimeError("Gemini API returned no text candidate")
+
+        usage_meta = response_payload.get("usageMetadata", {})
+        usage = TokenUsage(
+            input_tokens=int(usage_meta.get("promptTokenCount", 0) or 0),
+            output_tokens=int(usage_meta.get("candidatesTokenCount", 0) or 0),
+            cached_tokens=int(usage_meta.get("cachedContentTokenCount", 0) or 0),
+            reasoning_tokens=int(usage_meta.get("thoughtsTokenCount", 0) or 0),
+            total_tokens=int(usage_meta.get("totalTokenCount", 0) or 0),
+            measurement_type="provider",
+        )
+        return raw, self._try_parse_json(raw), usage
 
     # -- Helpers -------------------------------------------------------------
 

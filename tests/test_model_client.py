@@ -3,6 +3,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from harness.cache import ModelCache
@@ -98,6 +99,55 @@ class TestModelClientUnit(unittest.TestCase):
         res2 = client.analyze(prompt, experiment_id="exp-cache-test", metadata=meta, use_cache=True)
         self.assertTrue(res2.is_cached)
         self.assertEqual(res1.raw_response, res2.raw_response)
+
+    def test_gemini_rest_call_uses_provider_usage_and_header_key(self) -> None:
+        client = ModelClient(
+            default_model="gemini-2.5-flash",
+            results_dir=self.results_dir,
+            cache_dir=None,
+        )
+        response_payload = {
+            "candidates": [{"content": {"parts": [{"text": '[{"is_vulnerable": false}]'}]}}],
+            "usageMetadata": {
+                "promptTokenCount": 11,
+                "candidatesTokenCount": 4,
+                "totalTokenCount": 15,
+            },
+        }
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return json.dumps(response_payload).encode("utf-8")
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}, clear=False), patch(
+            "urllib.request.urlopen", side_effect=fake_urlopen
+        ):
+            result = client.analyze(
+                "Review this code",
+                experiment_id="exp-gemini-test",
+                timeout_seconds=17,
+                use_cache=False,
+            )
+
+        self.assertEqual(result.model, "gemini-2.5-flash")
+        self.assertEqual(result.usage.measurement_type, "provider")
+        self.assertEqual(result.usage.total_tokens, 15)
+        self.assertEqual(captured["timeout"], 17)
+        self.assertNotIn("test-key", captured["request"].full_url)
+        self.assertEqual(captured["request"].headers["X-goog-api-key"], "test-key")
 
 
 if __name__ == "__main__":
