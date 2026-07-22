@@ -33,6 +33,7 @@ class GroundTruthEntry:
     expected_vulnerable_behavior: str
     validation_evidence: str
     confidence: float = 0.95
+    review_status: str = "heuristic"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -41,8 +42,15 @@ class GroundTruthEntry:
 class GroundTruthManager:
     """Manages ground truth loading, extraction, and finding evaluation."""
 
-    def __init__(self, ground_truth_file: str | Path = "ground_truth/webgoat_ground_truth.jsonl") -> None:
+    def __init__(
+        self,
+        ground_truth_file: str | Path = "ground_truth/webgoat_ground_truth.jsonl",
+        source_root: str | Path | None = None,
+        coverage_complete: bool = False,
+    ) -> None:
         self.gt_file = Path(ground_truth_file).resolve()
+        self.source_root = Path(source_root).resolve() if source_root else None
+        self.coverage_complete = coverage_complete
         self.entries: list[GroundTruthEntry] = []
         if self.gt_file.exists():
             self.load_entries()
@@ -93,21 +101,6 @@ class GroundTruthManager:
                         ))
                         gt_counter += 1
 
-                    # Path Traversal detection
-                    elif "File" in content and ".." in content or ("getCanonicalPath" not in content and "FileInputStream" in content and "+" in content):
-                        entries.append(GroundTruthEntry(
-                            ground_truth_id=f"GT-WG-{gt_counter:03d}",
-                            lesson=fname.replace(".java", ""),
-                            module=self._extract_module(rel_p),
-                            vulnerability_type="Path Traversal",
-                            cwe="CWE-22",
-                            relevant_files=[rel_p],
-                            expected_vulnerable_behavior="File path constructed from untrusted user input without canonical bounds check",
-                            validation_evidence=self._extract_snippet(content, ["File", "FileInputStream"]),
-                            confidence=0.90,
-                        ))
-                        gt_counter += 1
-
                     # Deserialization detection
                     elif "ObjectInputStream" in content and "readObject" in content:
                         entries.append(GroundTruthEntry(
@@ -148,8 +141,12 @@ class GroundTruthManager:
         fp: list[Finding] = []
         uncertain: list[Finding] = []
 
+        reviewed_entries = [
+            entry for entry in self.entries
+            if entry.review_status == "reviewed" and self._evidence_exists(entry)
+        ]
         gt_file_map: dict[str, list[GroundTruthEntry]] = {}
-        for entry in self.entries:
+        for entry in reviewed_entries:
             for rf in entry.relevant_files:
                 gt_file_map.setdefault(rf, []).append(entry)
 
@@ -169,20 +166,47 @@ class GroundTruthManager:
                 tp.append(finding)
             elif finding.validation_status == ValidationStatus.UNCERTAIN or type_match:
                 uncertain.append(finding)
-            else:
+            elif self.coverage_complete:
                 fp.append(finding)
+            else:
+                uncertain.append(finding)
 
-        precision = len(tp) / (len(tp) + len(fp)) if (len(tp) + len(fp)) > 0 else 0.0
+        denominator = len(tp) + len(fp)
+        precision = (
+            round(len(tp) / denominator, 4)
+            if self.coverage_complete and denominator > 0
+            else None
+        )
 
         return {
             "true_positives": len(tp),
             "false_positives": len(fp),
             "uncertain": len(uncertain),
-            "estimated_precision": round(precision, 4),
+            "estimated_precision": precision,
+            "precision_type": "local_ground_truth" if precision is not None else "unavailable",
+            "ground_truth_complete": self.coverage_complete,
+            "reviewed_ground_truth_entries": len(reviewed_entries),
             "tp_findings": [f.finding_id for f in tp],
             "fp_findings": [f.finding_id for f in fp],
             "uncertain_findings": [f.finding_id for f in uncertain],
         }
+
+    def _evidence_exists(self, entry: GroundTruthEntry) -> bool:
+        """Require reviewed ground truth evidence to exist in its referenced source."""
+        evidence = entry.validation_evidence.strip()
+        if not evidence or evidence.startswith(("* SPDX-", "//", "/*", "import ")):
+            return False
+        if self.source_root is None:
+            return True
+        for relative in entry.relevant_files:
+            path = (self.source_root / relative).resolve()
+            try:
+                path.relative_to(self.source_root)
+            except ValueError:
+                continue
+            if path.is_file() and evidence in path.read_text(encoding="utf-8", errors="replace"):
+                return True
+        return False
 
     def _extract_module(self, rel_path: str) -> str:
         parts = Path(rel_path).parts
@@ -193,6 +217,9 @@ class GroundTruthManager:
 
     def _extract_snippet(self, content: str, keywords: list[str]) -> str:
         for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("*", "//", "/*", "import ")):
+                continue
             if any(kw in line for kw in keywords):
                 return line.strip()
         return content[:100].strip()

@@ -13,3 +13,4 @@ budget_chars: 32000
 concurrency: 2
 timeout_seconds: 30
 max_retries: 2
+ground_truth_complete: false

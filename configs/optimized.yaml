@@ -14,3 +14,4 @@ concurrency: 4
 timeout_seconds: 30
 max_retries: 2
 validator_model: gemini-2.5-flash
+ground_truth_complete: false

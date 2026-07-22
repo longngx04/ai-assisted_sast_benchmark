@@ -20,7 +20,7 @@ class TestGroundTruthUnit(unittest.TestCase):
         self.tmp_dir.cleanup()
 
     def test_save_load_entries(self) -> None:
-        gtm = GroundTruthManager(ground_truth_file=self.gt_path)
+        gtm = GroundTruthManager(ground_truth_file=self.gt_path, coverage_complete=True)
         entry = GroundTruthEntry(
             ground_truth_id="GT-001",
             lesson="SqlInjection",
@@ -31,6 +31,7 @@ class TestGroundTruthUnit(unittest.TestCase):
             expected_vulnerable_behavior="Raw SQL string concatenation",
             validation_evidence="stmt.executeQuery(query)",
             confidence=0.95,
+            review_status="reviewed",
         )
 
         gtm.entries = [entry]
@@ -43,7 +44,7 @@ class TestGroundTruthUnit(unittest.TestCase):
         self.assertEqual(loaded[0].cwe, "CWE-89")
 
     def test_evaluate_findings_tp_fp_uncertain(self) -> None:
-        gtm = GroundTruthManager(ground_truth_file=self.gt_path)
+        gtm = GroundTruthManager(ground_truth_file=self.gt_path, coverage_complete=True)
         gtm.entries = [
             GroundTruthEntry(
                 ground_truth_id="GT-001",
@@ -55,6 +56,7 @@ class TestGroundTruthUnit(unittest.TestCase):
                 expected_vulnerable_behavior="SQLi",
                 validation_evidence="stmt.executeQuery",
                 confidence=0.95,
+                review_status="reviewed",
             )
         ]
 
@@ -124,6 +126,13 @@ class TestGroundTruthUnit(unittest.TestCase):
         self.assertEqual(res["true_positives"], 1)
         self.assertEqual(res["false_positives"], 1)
         self.assertEqual(res["estimated_precision"], 0.5)
+
+    def test_incomplete_heuristic_ground_truth_does_not_claim_precision(self) -> None:
+        gtm = GroundTruthManager(ground_truth_file=self.gt_path, coverage_complete=False)
+        self.assertFalse(gtm.coverage_complete)
+        result = gtm.evaluate_findings([])
+        self.assertIsNone(result["estimated_precision"])
+        self.assertEqual(result["precision_type"], "unavailable")
 
 
 if __name__ == "__main__":

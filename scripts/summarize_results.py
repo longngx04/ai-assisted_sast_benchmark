@@ -48,10 +48,11 @@ def main() -> None:
         val = m.get("validated_findings", 0)
         tp = m.get("true_positives", 0)
         fp = m.get("false_positives", 0)
-        prec = m.get("estimated_precision", 0.0)
+        prec = m.get("estimated_precision")
         t_sec = m.get("runtime_seconds", 0.0)
 
-        print(f"{exp_id:<20} | {harness:<18} | {unique:<6} | {val:<9} | {tp:<4} | {fp:<4} | {prec:<9.3f} | {t_sec:<7.1f}")
+        prec_text = f"{prec:.3f}" if isinstance(prec, (int, float)) else "n/a"
+        print(f"{exp_id:<20} | {harness:<18} | {unique:<6} | {val:<9} | {tp:<4} | {fp:<4} | {prec_text:<9} | {t_sec:<7.1f}")
 
     print("=========================================================================================")
 

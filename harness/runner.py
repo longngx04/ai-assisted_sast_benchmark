@@ -184,9 +184,10 @@ class BenchmarkRunner:
 
         # 7. Ground Truth Evaluation
         self.timer.start_phase("ground_truth_eval")
-        gt_manager = GroundTruthManager()
-        if not gt_manager.entries:
-            gt_manager.build_webgoat_ground_truth(self.source_root)
+        gt_manager = GroundTruthManager(
+            source_root=self.source_root,
+            coverage_complete=bool(self.config.get("ground_truth_complete", False)),
+        )
         gt_eval = gt_manager.evaluate_findings(canonical_findings)
         self.timer.end_phase("ground_truth_eval")
 
@@ -207,7 +208,10 @@ class BenchmarkRunner:
         self.timer.end_phase("reporting")
 
         logger.info(f"Experiment '{self.experiment_id}' completed in {metrics['runtime_seconds']}s")
-        logger.info(f"Unique Findings: {metrics['unique_findings']} | Validated: {metrics['validated_findings']} | Precision: {metrics['estimated_precision']}")
+        precision_display = metrics["estimated_precision"]
+        if precision_display is None:
+            precision_display = "n/a (ground truth incomplete)"
+        logger.info(f"Unique Findings: {metrics['unique_findings']} | Validated: {metrics['validated_findings']} | Precision: {precision_display}")
 
         return metrics
 
