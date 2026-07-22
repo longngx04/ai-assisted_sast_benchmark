@@ -265,6 +265,7 @@ class ModelClient:
             return json.dumps(decision, indent=2), decision
 
         if "sqli" in prompt.lower() or category == "database":
+            snippet = str(meta.get("snippet", "")).strip()
             finding = [{
                 "vulnerability_type": "SQL Injection",
                 "cwe": "CWE-89",
@@ -274,7 +275,9 @@ class ModelClient:
                 "sink": "Statement.executeQuery",
                 "data_flow": ["parameter received", "concatenated into SQL"],
                 "description": "Untrusted input concatenated into SQL query.",
-                "evidence": "stmt.executeQuery(\"SELECT * FROM users WHERE name='\" + username + \"'\")",
+                "file": meta.get("file"),
+                "start_line": meta.get("line"),
+                "evidence": snippet,
                 "attack_scenario": "Attacker passes `' OR '1'='1`.",
                 "security_control": "None",
                 "recommendation": "Use PreparedStatement",

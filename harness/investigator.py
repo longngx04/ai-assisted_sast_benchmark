@@ -22,6 +22,21 @@ from harness.schemas import Finding, ValidationStatus
 logger = logging.getLogger(__name__)
 
 
+_CATEGORY_RESOURCES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "database": ("sqli", ("sqli",)),
+    "html_template": ("xss", ("xss",)),
+    "command_execution": ("command-injection", ("command-injection",)),
+    "file_handling": ("path-traversal", ("path-traversal",)),
+    "xml_parsing": ("xxe", ("xxe",)),
+    "deserialization": ("deserialization", ("deserialization",)),
+    "http_client": ("ssrf", ("ssrf",)),
+    "authorization": ("access-control", ("access-control",)),
+    "authentication": ("baseline", ("authentication",)),
+    "session": ("baseline", ("authentication",)),
+    "business_logic": ("baseline", ("business-logic",)),
+}
+
+
 class InvestigationAgent:
     """Coordinates context retrieval, prompt selection, model calls, and finding normalization for candidates.
 
@@ -46,6 +61,7 @@ class InvestigationAgent:
         client: ModelClient,
         recon: dict[str, Any] | None = None,
         prompts_dir: str | Path = "prompts",
+        skills_dir: str | Path = "skills",
         context_config: ContextConfig | None = None,
         timeout_seconds: float = 30.0,
         max_retries: int = 2,
@@ -56,6 +72,7 @@ class InvestigationAgent:
         self.client = client
         self.recon = recon or {}
         self.prompts_dir = Path(prompts_dir).resolve()
+        self.skills_dir = Path(skills_dir).resolve()
         self.context_builder = ContextBuilder(
             webgoat_root, index, recon=recon, config=context_config
         )
@@ -93,9 +110,9 @@ class InvestigationAgent:
         )
 
         # 2. Select prompt
-        prompt_name = "sqli" if category == "database" else category
-        prompt_template = self._load_prompt(prompt_name if use_specific_prompts else "baseline")
-        prompt_version = f"{prompt_name}-v1.0"
+        prompt_template, prompt_version = self._load_analysis_resources(
+            category, use_specific_prompts
+        )
 
         full_prompt = (
             f"{prompt_template}\n\n"
@@ -112,6 +129,9 @@ class InvestigationAgent:
             "prompt_version": prompt_version,
             "analysis_type": "investigation",
             "context_hash": str(ctx.total_chars),
+            "file": file_path,
+            "line": line_num,
+            "snippet": candidate.get("snippet", ""),
         }
         res = self.client.analyze(
             prompt=full_prompt,
@@ -141,12 +161,18 @@ class InvestigationAgent:
                 continue
 
             try:
-                if "file" not in raw_item or not raw_item["file"]:
-                    raw_item["file"] = file_path
-                if "start_line" not in raw_item or raw_item["start_line"] is None:
-                    raw_item["start_line"] = line_num
+                raw_item = dict(raw_item)
+                raw_item.setdefault("file", file_path)
+                raw_item.setdefault("start_line", line_num)
+                checked = self._verify_evidence(raw_item)
+                if checked is None:
+                    logger.warning(
+                        "Discarding model finding for %s: required fields or source evidence do not match",
+                        cand_id,
+                    )
+                    continue
                 finding = normalize_raw_finding(
-                    raw=raw_item,
+                    raw=checked,
                     experiment_id=experiment_id,
                     webgoat_root=str(self.webgoat_root),
                     tool="ai-assisted-sast",
@@ -201,3 +227,61 @@ class InvestigationAgent:
         content = p_path.read_text(encoding="utf-8") if p_path.exists() else "Audit this code for security vulnerabilities."
         self._prompt_cache[name] = content
         return content
+
+    def _load_analysis_resources(
+        self, category: str, use_specific_prompts: bool
+    ) -> tuple[str, str]:
+        if not use_specific_prompts:
+            return self._load_prompt("baseline"), "baseline-audit-v1.0"
+
+        prompt_name, skill_names = _CATEGORY_RESOURCES.get(
+            category, ("baseline", ())
+        )
+        sections = [self._load_prompt(prompt_name)]
+        for skill_name in skill_names:
+            skill_path = self.skills_dir / skill_name / "SKILL.md"
+            if skill_path.is_file():
+                sections.append(
+                    f"\n=== SECURITY SKILL: {skill_name} ===\n"
+                    + skill_path.read_text(encoding="utf-8")
+                )
+        return "\n".join(sections), f"{prompt_name}-v1.0"
+
+    def _verify_evidence(self, raw: dict[str, Any]) -> dict[str, Any] | None:
+        required_text = ("description", "evidence", "attack_scenario", "recommendation")
+        if any(not str(raw.get(field, "")).strip() for field in required_text):
+            return None
+        if not str(raw.get("sink", "")).strip():
+            return None
+        cwe = str(raw.get("cwe", "")).upper()
+        access_control = cwe in {"CWE-284", "CWE-639", "CWE-862"}
+        if not access_control and not str(raw.get("source", "")).strip():
+            return None
+        data_flow = raw.get("data_flow")
+        if not access_control and not (
+            isinstance(data_flow, list) and any(str(step).strip() for step in data_flow)
+        ):
+            return None
+
+        relative = Path(str(raw.get("file", "")))
+        if relative.is_absolute() or ".." in relative.parts:
+            return None
+        source_file = (self.webgoat_root / relative).resolve()
+        try:
+            source_file.relative_to(self.webgoat_root)
+        except ValueError:
+            return None
+        if not source_file.is_file():
+            return None
+
+        content = source_file.read_text(encoding="utf-8", errors="replace")
+        evidence = str(raw["evidence"]).strip()
+        offset = content.find(evidence)
+        if offset < 0:
+            return None
+        evidence_line = content.count("\n", 0, offset) + 1
+        checked = dict(raw)
+        checked["file"] = relative.as_posix()
+        checked["start_line"] = evidence_line
+        checked["end_line"] = evidence_line + evidence.count("\n")
+        return checked
