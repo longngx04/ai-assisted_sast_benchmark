@@ -1,0 +1,14 @@
+experiment_id: exp-c-indexed
+harness_name: indexed-harness
+model: gemini-2.5-flash
+prompt_strategy: indexed_context
+prompt_version: indexed-v1.0
+use_symbol_index: true
+use_architecture_map: true
+use_vulnerability_prompts: true
+use_independent_validation: true
+use_deduplication: true
+use_context_cache: true
+budget_chars: 32000
+concurrency: 2
+timeout_seconds: 30

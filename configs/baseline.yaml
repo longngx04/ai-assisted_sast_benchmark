@@ -1,0 +1,14 @@
+experiment_id: exp-a-baseline
+harness_name: baseline-harness
+model: gemini-2.5-flash
+prompt_strategy: general_audit
+prompt_version: baseline-audit-v1.0
+use_symbol_index: false
+use_architecture_map: false
+use_vulnerability_prompts: false
+use_independent_validation: false
+use_deduplication: false
+use_context_cache: false
+budget_chars: 16000
+concurrency: 1
+timeout_seconds: 30

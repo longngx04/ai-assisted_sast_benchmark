@@ -1,0 +1,14 @@
+experiment_id: exp-d-optimized
+harness_name: optimized-harness
+model: gemini-2.5-flash
+prompt_strategy: optimized_full_pipeline
+prompt_version: optimized-v2.0
+use_symbol_index: true
+use_architecture_map: true
+use_vulnerability_prompts: true
+use_independent_validation: true
+use_deduplication: true
+use_context_cache: true
+budget_chars: 32000
+concurrency: 4
+timeout_seconds: 30
