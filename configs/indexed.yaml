@@ -12,3 +12,4 @@ use_context_cache: true
 budget_chars: 32000
 concurrency: 2
 timeout_seconds: 30
+max_retries: 2

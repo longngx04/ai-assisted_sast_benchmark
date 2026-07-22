@@ -2,12 +2,20 @@
 # Script to run a SAST scan experiment (Phase 12 / Micro-task 12.4)
 set -e
 
-EXPERIMENT="${1:-exp-d-optimized}"
-CONFIG_FILE="configs/${EXPERIMENT#exp-}.yaml"
-
-if [ ! -f "$CONFIG_FILE" ]; then
-    CONFIG_FILE="configs/optimized.yaml"
+STRATEGY="${1:-optimized}"
+EXPERIMENT="${2:-}"
+if [ -z "$EXPERIMENT" ]; then
+    echo "Usage: $0 <baseline|vulnerability-specific|indexed|optimized> <new-experiment-id>" >&2
+    exit 2
 fi
+
+case "$STRATEGY" in
+  baseline) CONFIG_FILE="configs/baseline.yaml" ;;
+  vulnerability-specific) CONFIG_FILE="configs/vulnerability_specific.yaml" ;;
+  indexed) CONFIG_FILE="configs/indexed.yaml" ;;
+  optimized) CONFIG_FILE="configs/optimized.yaml" ;;
+  *) echo "Unknown strategy: $STRATEGY" >&2; exit 2 ;;
+esac
 
 echo "=================================================="
 echo " Running SAST Scan Experiment: $EXPERIMENT"
@@ -18,8 +26,7 @@ python3 -m harness.runner \
   --config "$CONFIG_FILE" \
   --experiment-id "$EXPERIMENT" \
   --source webgoat/WebGoat-2025.3 \
-  --output results \
-  --model mock
+  --output results
 
 echo "=================================================="
 echo " Validating Outputs..."

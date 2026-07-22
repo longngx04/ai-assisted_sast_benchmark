@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -45,13 +46,22 @@ class InvestigationAgent:
         client: ModelClient,
         recon: dict[str, Any] | None = None,
         prompts_dir: str | Path = "prompts",
+        context_config: ContextConfig | None = None,
+        timeout_seconds: float = 30.0,
+        max_retries: int = 2,
+        use_cache: bool = True,
     ) -> None:
         self.webgoat_root = Path(webgoat_root).resolve()
         self.index = index
         self.client = client
         self.recon = recon or {}
         self.prompts_dir = Path(prompts_dir).resolve()
-        self.context_builder = ContextBuilder(webgoat_root, index, recon=recon)
+        self.context_builder = ContextBuilder(
+            webgoat_root, index, recon=recon, config=context_config
+        )
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self.use_cache = use_cache
         self._prompt_cache: dict[str, str] = {}
 
     def investigate_candidate(
@@ -110,6 +120,9 @@ class InvestigationAgent:
             phase="investigation",
             agent="investigator",
             metadata=meta,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            use_cache=self.use_cache,
         )
 
         # 4. Schema normalization
@@ -153,17 +166,30 @@ class InvestigationAgent:
         experiment_id: str = "exp-d-optimized",
         model: str | None = None,
         use_specific_prompts: bool = True,
+        concurrency: int = 1,
     ) -> list[Finding]:
         """Investigate a batch of candidates."""
         all_findings: list[Finding] = []
-        for cand in candidates:
-            findings = self.investigate_candidate(
+        def investigate(cand: dict[str, Any]) -> list[Finding]:
+            return self.investigate_candidate(
                 candidate=cand,
                 experiment_id=experiment_id,
                 model=model,
                 use_specific_prompts=use_specific_prompts,
             )
-            all_findings.extend(findings)
+
+        worker_count = max(1, int(concurrency))
+        if worker_count == 1:
+            batches = map(investigate, candidates)
+        else:
+            executor = ThreadPoolExecutor(max_workers=worker_count)
+            batches = executor.map(investigate, candidates)
+        try:
+            for findings in batches:
+                all_findings.extend(findings)
+        finally:
+            if worker_count > 1:
+                executor.shutdown(wait=True)
         return all_findings
 
     def _load_prompt(self, name: str) -> str:

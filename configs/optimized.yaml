@@ -12,3 +12,5 @@ use_context_cache: true
 budget_chars: 32000
 concurrency: 4
 timeout_seconds: 30
+max_retries: 2
+validator_model: gemini-2.5-flash

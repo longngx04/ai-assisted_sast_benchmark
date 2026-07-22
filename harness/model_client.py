@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import time
+import threading
 import uuid
 import urllib.error
 import urllib.parse
@@ -93,6 +94,7 @@ class ModelClient:
         self.default_model = default_model
         self.results_dir = Path(results_dir).resolve()
         self.cache = ModelCache(cache_dir) if cache_dir else None
+        self._usage_lock = threading.Lock()
 
     # -- Public API ----------------------------------------------------------
 
@@ -401,5 +403,6 @@ class ModelClient:
             "error": response.error,
         }
 
-        with open(usage_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with self._usage_lock:
+            with open(usage_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,9 @@ class IndependentValidator:
         index: JavaSymbolIndex,
         client: ModelClient,
         prompts_dir: str | Path = "prompts",
+        timeout_seconds: float = 30.0,
+        max_retries: int = 2,
+        use_cache: bool = True,
     ) -> None:
         self.webgoat_root = Path(webgoat_root).resolve()
         self.index = index
@@ -54,6 +58,9 @@ class IndependentValidator:
         self.prompts_dir = Path(prompts_dir).resolve()
         self.context_builder = ContextBuilder(webgoat_root, index)
         self.validator_prompt = self._load_prompt("validation.md")
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
+        self.use_cache = use_cache
 
     def validate_finding(
         self,
@@ -101,6 +108,9 @@ class IndependentValidator:
             phase="validation",
             agent="validator",
             metadata=meta,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            use_cache=self.use_cache,
         )
 
         val_result = self._parse_validation_result(res.parsed_json, res.raw_response)
@@ -113,17 +123,24 @@ class IndependentValidator:
         experiment_id: str = "exp-d-optimized",
         validator_name: str = "independent-judge",
         model: str | None = None,
+        concurrency: int = 1,
     ) -> list[Finding]:
         """Validate a list of findings and return updated findings."""
         updated: list[Finding] = []
-        for f in findings:
+        def validate(f: Finding) -> Finding:
             upd_finding, _ = self.validate_finding(
                 finding=f,
                 experiment_id=experiment_id,
                 validator_name=validator_name,
                 model=model,
             )
-            updated.append(upd_finding)
+            return upd_finding
+
+        worker_count = max(1, int(concurrency))
+        if worker_count == 1:
+            return [validate(f) for f in findings]
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            updated.extend(executor.map(validate, findings))
         return updated
 
     def partition_and_save_findings(

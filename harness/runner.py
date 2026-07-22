@@ -12,12 +12,13 @@ import logging
 import os
 import sys
 import yaml
+from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from harness.candidate_finder import CandidateFinder, run_candidate_discovery
-from harness.context_builder import ContextBuilder
+from harness.context_builder import ContextBuilder, ContextConfig
 from harness.deduplicator import Deduplicator
 from harness.exclusions import ExclusionPolicy
 from harness.ground_truth import GroundTruthManager
@@ -41,16 +42,21 @@ class BenchmarkRunner:
         source_root: str | Path = "webgoat/WebGoat-2025.3",
         results_dir: str | Path = "results",
         experiment_id: str = "exp-d-optimized",
-        model: str = "mock",
+        model: str | None = None,
         exclusions_config: str | Path = "configs/exclusions.json",
     ) -> None:
         self.config = self._load_config(config_path) if config_path else {}
         self.source_root = Path(source_root if source_root != "webgoat/WebGoat-2025.3" else self.config.get("source_root", source_root)).resolve()
         self.results_dir = Path(results_dir if results_dir != "results" else self.config.get("results_dir", results_dir)).resolve()
         self.experiment_id = experiment_id if experiment_id != "exp-d-optimized" else self.config.get("experiment_id", experiment_id)
-        self.model = model or self.config.get("model", "mock")
+        self.model = model or self.config.get("model", "gemini-2.5-flash")
         self.exclusions_config = Path(exclusions_config if exclusions_config != "configs/exclusions.json" else self.config.get("exclusions_config", exclusions_config)).resolve()
         self.harness_name = self.config.get("harness_name", "agentic-harness")
+        self.concurrency = max(1, int(self.config.get("concurrency", 1)))
+        self.timeout_seconds = float(self.config.get("timeout_seconds", 30))
+        self.max_retries = max(0, int(self.config.get("max_retries", 2)))
+        self.use_cache = bool(self.config.get("use_context_cache", False))
+        self.budget_chars = max(1000, int(self.config.get("budget_chars", 32_000)))
 
         self.policy = ExclusionPolicy.from_file(self.exclusions_config) if self.exclusions_config.exists() else None
         self.timer = PhaseTimer()
@@ -60,6 +66,24 @@ class BenchmarkRunner:
         logger.info(f"Starting SAST Benchmark experiment '{self.experiment_id}' on {self.source_root}")
         exp_dir = self.results_dir / self.experiment_id
         exp_dir.mkdir(parents=True, exist_ok=True)
+        usage_file = exp_dir / "llm_usage.jsonl"
+        if usage_file.exists() and usage_file.stat().st_size:
+            raise RuntimeError(
+                f"Experiment '{self.experiment_id}' already has usage data; choose a new "
+                "experiment ID so metrics from separate runs are never mixed"
+            )
+        run_metadata = {
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "experiment_id": self.experiment_id,
+            "model": self.model,
+            "config": self.config,
+            "concurrency": self.concurrency,
+            "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
+        }
+        (exp_dir / "run_metadata.json").write_text(
+            json.dumps(run_metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
 
         # 1. Reconnaissance
         self.timer.start_phase("reconnaissance")
@@ -80,7 +104,8 @@ class BenchmarkRunner:
         # 3. Candidate Discovery
         self.timer.start_phase("candidate_discovery")
         logger.info("Phase 3: Candidate Discovery...")
-        cand_finder = CandidateFinder(self.source_root, index=index, exclusion_policy=self.policy)
+        candidate_index = index if self.config.get("use_symbol_index", True) else None
+        cand_finder = CandidateFinder(self.source_root, index=candidate_index, exclusion_policy=self.policy)
         cands = cand_finder.scan()
         cand_dicts = [c.to_dict() for c in cands]
         cands_file = exp_dir / "candidates.jsonl"
@@ -96,7 +121,14 @@ class BenchmarkRunner:
             webgoat_root=self.source_root,
             index=index,
             client=client,
-            recon=recon_dict,
+            recon=recon_dict if self.config.get("use_architecture_map", True) else None,
+            context_config=ContextConfig(
+                budget_chars=self.budget_chars,
+                include_architecture_summary=self.config.get("use_architecture_map", True),
+            ),
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            use_cache=self.use_cache,
         )
 
         raw_findings = investigator.investigate_batch(
@@ -104,6 +136,7 @@ class BenchmarkRunner:
             experiment_id=self.experiment_id,
             model=self.model,
             use_specific_prompts=self.config.get("use_vulnerability_prompts", True),
+            concurrency=self.concurrency,
         )
         raw_file = exp_dir / "raw_findings.jsonl"
         raw_file.write_text("\n".join(json.dumps(f.to_dict(), ensure_ascii=False) for f in raw_findings) + "\n", encoding="utf-8")
@@ -116,12 +149,16 @@ class BenchmarkRunner:
             webgoat_root=self.source_root,
             index=index,
             client=client,
+            timeout_seconds=self.timeout_seconds,
+            max_retries=self.max_retries,
+            use_cache=self.use_cache,
         )
         if self.config.get("use_independent_validation", True):
             validated_findings = validator.validate_batch(
                 findings=raw_findings,
                 experiment_id=self.experiment_id,
-                model=self.model,
+                model=self.config.get("validator_model", self.model),
+                concurrency=self.concurrency,
             )
         else:
             validated_findings = raw_findings
@@ -133,8 +170,16 @@ class BenchmarkRunner:
         self.timer.start_phase("deduplication")
         logger.info("Phase 6: Deduplication...")
         dedup = Deduplicator()
-        canonical_findings, duplicate_findings = dedup.deduplicate(validated_findings)
-        dedup.process_and_save(validated_findings, self.results_dir, self.experiment_id)
+        if self.config.get("use_deduplication", True):
+            canonical_findings, duplicate_findings = dedup.deduplicate(validated_findings)
+            dedup.process_and_save(validated_findings, self.results_dir, self.experiment_id)
+        else:
+            canonical_findings, duplicate_findings = validated_findings, []
+            (exp_dir / "findings.jsonl").write_text(
+                "\n".join(json.dumps(f.to_dict(), ensure_ascii=False) for f in canonical_findings)
+                + ("\n" if canonical_findings else ""),
+                encoding="utf-8",
+            )
         self.timer.end_phase("deduplication")
 
         # 7. Ground Truth Evaluation
@@ -183,7 +228,7 @@ def main() -> None:
     parser.add_argument("--source", "-s", default="webgoat/WebGoat-2025.3", help="WebGoat source root")
     parser.add_argument("--output", "-o", default="results", help="Output results directory")
     parser.add_argument("--experiment-id", "-e", default="exp-d-optimized", help="Experiment ID")
-    parser.add_argument("--model", "-m", default="mock", help="Model name (gemini-2.5-flash or mock)")
+    parser.add_argument("--model", "-m", default=None, help="Override model from config")
 
     args = parser.parse_args()
     runner = BenchmarkRunner(
