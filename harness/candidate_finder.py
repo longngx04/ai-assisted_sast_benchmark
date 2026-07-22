@@ -57,6 +57,7 @@ class FindingRule:
     pattern: re.Pattern[str]
     description: str
     default_priority: str = "medium"
+    file_suffixes: tuple[str, ...] = (".java",)
 
 
 # 15 Categories of security rules
@@ -90,6 +91,22 @@ _RULES: list[FindingRule] = [
         pattern=re.compile(r'th:utext\s*='),
         description="Thymeleaf unescaped text attribute (th:utext)",
         default_priority="high",
+    ),
+    FindingRule(
+        rule_id="xss_dom_sink",
+        category="html_template",
+        pattern=re.compile(r'\b(innerHTML|outerHTML|document\.write|eval)\s*(=|\()'),
+        description="DOM HTML or code execution sink in client-side source",
+        default_priority="high",
+        file_suffixes=(".js", ".mjs", ".html", ".htm"),
+    ),
+    FindingRule(
+        rule_id="xss_unescaped_template",
+        category="html_template",
+        pattern=re.compile(r'(?:v-html\s*=|\{\{\{[^}]+\}\}\}|<%=)'),
+        description="Unescaped template output in HTML source",
+        default_priority="high",
+        file_suffixes=(".html", ".htm", ".js", ".mjs"),
     ),
     # 3. Command Execution
     FindingRule(
@@ -202,6 +219,22 @@ _RULES: list[FindingRule] = [
         description="Reflection or dynamic class loading",
         default_priority="medium",
     ),
+    FindingRule(
+        rule_id="xml_external_entity",
+        category="xml_parsing",
+        pattern=re.compile(r'<!DOCTYPE[^>]*(?:SYSTEM|PUBLIC)|external-general-entities', re.IGNORECASE),
+        description="XML source enables or declares external entity processing",
+        default_priority="high",
+        file_suffixes=(".xml", ".xhtml", ".html"),
+    ),
+    FindingRule(
+        rule_id="config_hardcoded_secret",
+        category="cryptography",
+        pattern=re.compile(r'(?i)(?:password|secret|api[_-]?key|private[_-]?key)\s*[:=]\s*[^${}\s][^\s#]+'),
+        description="Potential hardcoded secret in configuration source",
+        default_priority="high",
+        file_suffixes=(".properties", ".yml", ".yaml", ".xml"),
+    ),
 ]
 
 
@@ -239,12 +272,12 @@ class CandidateFinder:
         self._candidates: list[Candidate] = []
 
     def scan(self) -> list[Candidate]:
-        """Run candidate discovery across all non-excluded Java files."""
+        """Run candidate discovery across supported non-excluded source files."""
         self._candidates = []
-        java_files = self._collect_java_files()
+        source_files = self._collect_source_files()
         
         cand_counter = 1
-        for fpath in java_files:
+        for fpath in source_files:
             rel_file = str(fpath.relative_to(self.root)).replace(os.sep, "/")
             lines = self._read_file(fpath)
 
@@ -254,6 +287,8 @@ class CandidateFinder:
                     continue
 
                 for rule in _RULES:
+                    if not fpath.name.lower().endswith(rule.file_suffixes):
+                        continue
                     m = rule.pattern.search(line)
                     if not m:
                         continue
@@ -282,11 +317,12 @@ class CandidateFinder:
 
         return self._candidates
 
-    def _collect_java_files(self) -> list[Path]:
+    def _collect_source_files(self) -> list[Path]:
         files: list[Path] = []
+        supported_suffixes = {suffix for rule in _RULES for suffix in rule.file_suffixes}
         for dirpath, _dirnames, filenames in os.walk(self.root):
             for fname in filenames:
-                if not fname.endswith(".java"):
+                if not fname.lower().endswith(tuple(supported_suffixes)):
                     continue
                 abs_p = Path(dirpath) / fname
                 rel_p = str(abs_p.relative_to(self.root)).replace(os.sep, "/")

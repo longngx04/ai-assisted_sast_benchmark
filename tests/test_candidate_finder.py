@@ -42,6 +42,15 @@ public class VulnerableService {
 """,
             encoding="utf-8",
         )
+        self.web_dir = self.root / "src" / "main" / "resources"
+        self.web_dir.mkdir(parents=True)
+        (self.web_dir / "lesson.js").write_text(
+            "const value = request.query.name; element.innerHTML = value;\n",
+            encoding="utf-8",
+        )
+        (self.web_dir / "lesson.html").write_text(
+            '<div th:utext="${name}"></div>\n', encoding="utf-8"
+        )
 
     def tearDown(self) -> None:
         self.tmp_dir.cleanup()
@@ -54,6 +63,7 @@ public class VulnerableService {
         categories = [c.category for c in cands]
         self.assertIn("database", categories)
         self.assertIn("command_execution", categories)
+        self.assertIn("html_template", categories)
 
     def test_early_rejection_parameterized(self) -> None:
         finder = CandidateFinder(webgoat_root=self.root)
