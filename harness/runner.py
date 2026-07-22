@@ -23,6 +23,7 @@ from harness.deduplicator import Deduplicator
 from harness.exclusions import ExclusionPolicy
 from harness.ground_truth import GroundTruthManager
 from harness.indexer import JavaIndexer, run_indexing
+from harness.indexer import JavaSymbolIndex
 from harness.investigator import InvestigationAgent
 from harness.metrics import MetricsCalculator, PhaseTimer
 from harness.model_client import ModelClient
@@ -80,6 +81,8 @@ class BenchmarkRunner:
             "concurrency": self.concurrency,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
+            "command": sys.argv,
+            "source_root": str(self.source_root),
         }
         (exp_dir / "run_metadata.json").write_text(
             json.dumps(run_metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -104,7 +107,8 @@ class BenchmarkRunner:
         # 3. Candidate Discovery
         self.timer.start_phase("candidate_discovery")
         logger.info("Phase 3: Candidate Discovery...")
-        candidate_index = index if self.config.get("use_symbol_index", True) else None
+        use_symbol_index = bool(self.config.get("use_symbol_index", True))
+        candidate_index = index if use_symbol_index else None
         cand_finder = CandidateFinder(self.source_root, index=candidate_index, exclusion_policy=self.policy)
         cands = cand_finder.scan()
         cand_dicts = [c.to_dict() for c in cands]
@@ -117,9 +121,19 @@ class BenchmarkRunner:
         logger.info("Phase 4: LLM Investigation...")
         client = ModelClient(default_model=self.model, results_dir=self.results_dir)
         recon_dict = asdict(recon_result)
+        analysis_index = index if use_symbol_index else JavaSymbolIndex(
+            generated_at="",
+            webgoat_root=str(self.source_root),
+            total_java_files=0,
+            indexed_files=0,
+            excluded_files=0,
+            classes=[],
+            caller_callee_edges=[],
+            summary={},
+        )
         investigator = InvestigationAgent(
             webgoat_root=self.source_root,
-            index=index,
+            index=analysis_index,
             client=client,
             recon=recon_dict if self.config.get("use_architecture_map", True) else None,
             context_config=ContextConfig(
@@ -147,7 +161,7 @@ class BenchmarkRunner:
         logger.info("Phase 5: Independent Validation...")
         validator = IndependentValidator(
             webgoat_root=self.source_root,
-            index=index,
+            index=analysis_index,
             client=client,
             timeout_seconds=self.timeout_seconds,
             max_retries=self.max_retries,
